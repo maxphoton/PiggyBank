@@ -1,0 +1,17 @@
+.env
+*.db
+*.json
+*.log
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+venv/
+env/
+ENV/
+data/
+deploy.sh
+SETUP_GIT.md
+.venv/
+

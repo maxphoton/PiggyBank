@@ -1,0 +1,19 @@
+services:
+  piggybank-bot:
+    build: .
+    container_name: piggybank-bot
+    restart: always
+    env_file:
+      - .env
+    environment:
+      - DATA_DIR=data
+    volumes:
+      # Прокидывание всей директории data наружу (БД, логи, кэш)
+      - ./data:/app/data
+    networks:
+      - piggybank-network
+
+networks:
+  piggybank-network:
+    driver: bridge
+
