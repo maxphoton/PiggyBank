@@ -128,7 +128,7 @@ async def create_assets_keyboard(assets, user_id: int):
             
             # Проверяем, подписан ли пользователь
             is_subscribed = asset_ticker in subscriptions
-            checkbox = "✅" if is_subscribed else "☐"
+            checkbox = "✅" if is_subscribed else "🔲"
             
             builder.add(InlineKeyboardButton(
                 text=f"{checkbox} {asset_name}",
@@ -181,10 +181,14 @@ async def cmd_start(message: types.Message):
     keyboard = await create_assets_keyboard(assets_with_epoch, user.id)
     
     # Отправка сообщения с кнопками
-    text = f"""📊 Select assets to receive notifications:
+    text = f"""📊 <b>Select assets to receive notifications</b>
 
 Found assets: {len(assets_with_epoch)}
-Click on an asset to enable/disable notifications"""
+Click on an asset to enable/disable notifications
+
+🔔 <b>You will receive notifications about:</b>
+• 🔄 Epoch changes for subscribed assets
+• 📈📉 Capacity changes (when TVL changes by more than 1)"""
     
     await message.answer(text, reply_markup=keyboard, parse_mode='HTML')
     logger.debug(f"Сообщение с клавиатурой отправлено пользователю {user.id}")
@@ -204,20 +208,27 @@ async def cmd_demo(message: types.Message):
     demo_ticker = "USDC"
     demo_old_epoch = 34
     demo_new_epoch = 35
-    demo_free_space = 50000
+    demo_tvl = 950000
+    demo_cap = 1000000
+    demo_change_positive = 123.45
+    demo_change_negative = -67.89
     
     demo_notifications = [
         {
             'type': 'epoch_appeared',
-            'message': f"🆕 New asset added <b>{demo_asset_name}</b>!\nFree space: {demo_free_space}\n\nUse /start to configure notifications for this asset.\n\n<a href=\"https://app.piggybank.fi/\">Open PiggyBank</a>\n\n<i>⚠️ This is a demo notification</i>"
+            'message': f"🆕 New asset added <b>{demo_asset_name}</b>!\nFilled: {demo_tvl:,} / {demo_cap:,}\n\nUse /start to configure notifications for this asset.\n\n<a href=\"https://app.piggybank.fi/\">Open PiggyBank</a>\n\n<i>⚠️ This is a demo notification</i>"
         },
         {
             'type': 'epoch_changed',
-            'message': f"🔄 New Epoch for <b>{demo_asset_name}</b>: {demo_old_epoch} → {demo_new_epoch}\nFree space: {demo_free_space}\n\n<a href=\"https://app.piggybank.fi/\">Open PiggyBank</a>\n\n<i>⚠️ This is a demo notification</i>"
+            'message': f"🔄 New Epoch for <b>{demo_asset_name}</b>: {demo_old_epoch} → {demo_new_epoch}\nFilled: {demo_tvl:,} / {demo_cap:,}\n\n<a href=\"https://app.piggybank.fi/\">Open PiggyBank</a>\n\n<i>⚠️ This is a demo notification</i>"
         },
         {
-            'type': 'space_available',
-            'message': f"✅ Space available for <b>{demo_asset_name}</b>! Free: {demo_free_space}\n\n<a href=\"https://app.piggybank.fi/\">Open PiggyBank</a>\n\n<i>⚠️ This is a demo notification</i>"
+            'type': 'lst_tvl_changed_positive',
+            'message': f"📈 <b>Capacity changed</b>\n\nAsset: <b>{demo_asset_name}</b> ({demo_ticker})\nChange: +{demo_change_positive:.2f}\nFilled: {demo_tvl:,} / {demo_cap:,}\n\n<a href=\"https://app.piggybank.fi/\">Open PiggyBank</a>\n\n<i>⚠️ This is a demo notification</i>"
+        },
+        {
+            'type': 'lst_tvl_changed_negative',
+            'message': f"📉 <b>Capacity changed</b>\n\nAsset: <b>{demo_asset_name}</b> ({demo_ticker})\nChange: {demo_change_negative:.2f}\nFilled: {demo_tvl:,} / {demo_cap:,}\n\n<a href=\"https://app.piggybank.fi/\">Open PiggyBank</a>\n\n<i>⚠️ This is a demo notification</i>"
         }
     ]
     
@@ -226,7 +237,11 @@ async def cmd_demo(message: types.Message):
     
     for notification in demo_notifications:
         try:
-            await message.answer(notification['message'], parse_mode='HTML')
+            await message.answer(
+                notification['message'], 
+                parse_mode='HTML',
+                link_preview_options=types.LinkPreviewOptions(is_disabled=True)
+            )
             await asyncio.sleep(1)  # Задержка между сообщениями
         except Exception as e:
             logger.error(f"Ошибка при отправке демо-уведомления {notification['type']}: {e}", exc_info=True)
@@ -319,6 +334,103 @@ async def cmd_get_data(message: types.Message):
         await message.answer(f"❌ Error: {e}", parse_mode='HTML')
 
 
+@dp.message(Command("about"))
+async def cmd_about(message: types.Message):
+    """Обработчик команды /about - информация о боте и контактах"""
+    user = message.from_user
+    if not user:
+        return
+    
+    logger.info(f"Команда /about от пользователя {user.id} (@{user.username})")
+    
+    about_text = """ℹ️ <b>About Bot</b>
+
+For all questions and suggestions, please contact:
+<a href="https://x.com/maxproton_astra">@maxproton_astra</a>"""
+    
+    await message.answer(
+        about_text,
+        parse_mode='HTML',
+        link_preview_options=types.LinkPreviewOptions(is_disabled=True)
+    )
+    logger.info(f"Информация о боте отправлена пользователю {user.id}")
+
+
+@dp.message(Command("get_stats"))
+async def cmd_get_stats(message: types.Message):
+    """Обработчик команды /get_stats - статистика по всем ассетам с эпохой"""
+    user = message.from_user
+    if not user:
+        return
+    
+    logger.info(f"Команда /get_stats от пользователя {user.id} (@{user.username})")
+    
+    try:
+        # Получение данных с API
+        assets_data = await fetch_assets()
+        
+        if assets_data is None:
+            logger.warning(f"Не удалось получить данные с API для пользователя {user.id}")
+            await message.answer("❌ Failed to fetch data from API. Please try again later.", parse_mode='HTML')
+            return
+        
+        # Фильтрация активов с ключом epoch
+        assets_with_epoch = [asset for asset in assets_data if 'epoch' in asset]
+        logger.info(f"Найдено активов с epoch: {len(assets_with_epoch)}")
+        
+        if not assets_with_epoch:
+            await message.answer("ℹ️ No assets found.", parse_mode='HTML')
+            return
+        
+        # Формирование сообщения со статистикой
+        stats_lines = ["📊 <b>Assets Statistics</b>\n"]
+        
+        for asset in assets_with_epoch:
+            asset_name = asset.get('asset_name', 'Unknown')
+            ticker = asset.get('asset_ticker', 'N/A')
+            epoch = asset.get('epoch', 'N/A')
+            
+            # Получаем значения lst_tvl и lst_cap
+            lst_tvl = asset.get('lst_tvl')
+            lst_cap = asset.get('lst_cap')
+            
+            # Формируем строку с информацией о заполнении
+            if lst_tvl is not None and lst_cap is not None:
+                try:
+                    tvl_int = int(float(lst_tvl))
+                    cap_int = int(float(lst_cap))
+                    
+                    # Вычисляем процент заполнения
+                    if cap_int > 0:
+                        percentage = (tvl_int / cap_int) * 100
+                        percentage_str = f"{percentage:.2f}%"
+                    else:
+                        percentage_str = "N/A"
+                    
+                    fill_info = f"{tvl_int:,} / {cap_int:,} ({percentage_str})"
+                except (ValueError, TypeError):
+                    fill_info = "N/A"
+            else:
+                fill_info = "N/A"
+            
+            # Добавляем информацию об активе
+            stats_lines.append(f"<b>{asset_name}</b> ({ticker})")
+            stats_lines.append(f"Epoch: {epoch}")
+            stats_lines.append(f"Filled: {fill_info}")
+            stats_lines.append("")  # Пустая строка для разделения
+        
+        # Объединяем все строки в одно сообщение
+        stats_message = "\n".join(stats_lines)
+        
+        # Отправляем сообщение
+        await message.answer(stats_message, parse_mode='HTML')
+        logger.info(f"Статистика отправлена пользователю {user.id}")
+        
+    except Exception as e:
+        logger.error(f"Ошибка при выполнении команды /get_stats: {e}", exc_info=True)
+        await message.answer(f"❌ Error: {e}", parse_mode='HTML')
+
+
 @dp.callback_query(lambda c: c.data.startswith("toggle_"))
 async def process_asset_toggle(callback: types.CallbackQuery):
     """Обработчик переключения подписки на актив"""
@@ -350,7 +462,7 @@ async def process_asset_toggle(callback: types.CallbackQuery):
         await callback.answer(f"✅ Notifications for {asset_name} enabled")
     else:
         logger.info(f"Пользователь {user.id} отписался от {asset_name} ({asset_ticker})")
-        await callback.answer(f"☐ Notifications for {asset_name} disabled")
+        await callback.answer(f"🔲 Notifications for {asset_name} disabled")
     
     # Обновляем клавиатуру
     assets_with_epoch = [a for a in assets_data if 'epoch' in a]
@@ -406,25 +518,26 @@ async def check_assets_changes():
     # Получаем список всех пользователей один раз для оптимизации
     all_users = await get_all_users()
     
-    # 1. Проверяем появление ключа epoch у существующих объектов или новых объектов с epoch
+    # 1. Проверяем появление ключа epoch (для существующих и новых объектов)
     for ticker, current_asset in current_dict.items():
         saved_asset = saved_dict.get(ticker)
         current_has_epoch = 'epoch' in current_asset
         saved_has_epoch = saved_asset and 'epoch' in saved_asset if saved_asset else False
         
         if current_has_epoch and not saved_has_epoch:
-            # Появился ключ epoch
+            # Появился ключ epoch (новый актив или у существующего)
             asset_name = current_asset.get('asset_name', ticker)
             logger.info(f"Обнаружено появление epoch для актива {asset_name} ({ticker}). Пользователей для уведомления: {len(all_users)}")
             
-            # Получаем информацию о свободном месте
-            free_space_text = ""
+            # Формируем информацию "сколько осталось из скольки"
+            capacity_info = ""
             current_lst_cap = current_asset.get('lst_cap')
             current_lst_tvl = current_asset.get('lst_tvl')
             if current_lst_cap is not None and current_lst_tvl is not None:
                 try:
-                    free_space = int(current_lst_cap) - int(current_lst_tvl)
-                    free_space_text = f"\nFree space: {free_space}"
+                    cap_int = int(float(current_lst_cap))
+                    tvl_int = int(float(current_lst_tvl))
+                    capacity_info = f"\nFilled: {tvl_int:,} / {cap_int:,}"
                 except (ValueError, TypeError):
                     pass
             
@@ -433,32 +546,7 @@ async def check_assets_changes():
                 'asset_ticker': ticker,
                 'asset_name': asset_name,
                 'users': all_users,
-                'message': f"🆕 New asset added <b>{asset_name}</b>!{free_space_text}\n\nUse /start to configure notifications for this asset.\n\n<a href=\"https://app.piggybank.fi/\">Open PiggyBank</a>"
-            })
-    
-    # Проверяем новые объекты с epoch
-    for ticker, current_asset in current_dict.items():
-        if ticker not in saved_dict and 'epoch' in current_asset:
-            asset_name = current_asset.get('asset_name', ticker)
-            logger.info(f"Обнаружен новый актив с epoch: {asset_name} ({ticker}). Пользователей для уведомления: {len(all_users)}")
-            
-            # Получаем информацию о свободном месте
-            free_space_text = ""
-            current_lst_cap = current_asset.get('lst_cap')
-            current_lst_tvl = current_asset.get('lst_tvl')
-            if current_lst_cap is not None and current_lst_tvl is not None:
-                try:
-                    free_space = int(current_lst_cap) - int(current_lst_tvl)
-                    free_space_text = f"\nFree space: {free_space}"
-                except (ValueError, TypeError):
-                    pass
-            
-            notifications.append({
-                'type': 'new_asset_with_epoch',
-                'asset_ticker': ticker,
-                'asset_name': asset_name,
-                'users': all_users,
-                'message': f"🆕 New asset added: <b>{asset_name}</b>!{free_space_text}\n\nUse /start to configure notifications for this asset.\n\n<a href=\"https://app.piggybank.fi/\">Open PiggyBank</a>"
+                'message': f"🆕 New asset added <b>{asset_name}</b>!{capacity_info}\n\nUse /start to configure notifications for this asset.\n\n<a href=\"https://app.piggybank.fi/\">Open PiggyBank</a>"
             })
     
     # 2. Проверяем изменение ключа epoch
@@ -474,14 +562,15 @@ async def check_assets_changes():
                 if subscribed_users:
                     logger.info(f"Обнаружено изменение epoch для {asset_name} ({ticker}): {saved_epoch} → {current_epoch}. Подписчиков: {len(subscribed_users)}")
                     
-                    # Получаем информацию о свободном месте
-                    free_space_text = ""
+                    # Формируем информацию "сколько осталось из скольки"
+                    capacity_info = ""
                     current_lst_cap = current_asset.get('lst_cap')
                     current_lst_tvl = current_asset.get('lst_tvl')
                     if current_lst_cap is not None and current_lst_tvl is not None:
                         try:
-                            free_space = int(current_lst_cap) - int(current_lst_tvl)
-                            free_space_text = f"\nFree space: {free_space}"
+                            cap_int = int(float(current_lst_cap))
+                            tvl_int = int(float(current_lst_tvl))
+                            capacity_info = f"\nFilled: {tvl_int:,} / {cap_int:,}"
                         except (ValueError, TypeError):
                             pass
                     
@@ -492,75 +581,66 @@ async def check_assets_changes():
                         'users': subscribed_users,
                         'old_epoch': saved_epoch,
                         'new_epoch': current_epoch,
-                        'message': f"🔄 New Epoch for <b>{asset_name}</b>: {saved_epoch} → {current_epoch}{free_space_text}\n\n<a href=\"https://app.piggybank.fi/\">Open PiggyBank</a>"
+                        'message': f"🔄 New Epoch for <b>{asset_name}</b>: {saved_epoch} → {current_epoch}{capacity_info}\n\n<a href=\"https://app.piggybank.fi/\">Open PiggyBank</a>"
                     })
     
-    # 3. Проверяем изменения lst_tvl и появление свободного места
+    # 3. Проверяем изменения lst_tvl (только для существующих активов, не отслеживаем появление)
     for ticker, current_asset in current_dict.items():
         saved_asset = saved_dict.get(ticker)
         if saved_asset:
-            current_lst_cap = current_asset.get('lst_cap')
             current_lst_tvl = current_asset.get('lst_tvl')
-            saved_lst_cap = saved_asset.get('lst_cap')
             saved_lst_tvl = saved_asset.get('lst_tvl')
+            current_lst_cap = current_asset.get('lst_cap')
             
-            # Проверяем, что все значения существуют
-            if all(x is not None for x in [current_lst_cap, current_lst_tvl, saved_lst_cap, saved_lst_tvl]):
+            # Проверяем, что значения существуют (не отслеживаем появление lst_tvl, только изменения)
+            if current_lst_tvl is not None and saved_lst_tvl is not None:
                 try:
                     # Преобразование в float для сохранения десятичной части
-                    current_cap_float = float(current_lst_cap)
                     current_tvl_float = float(current_lst_tvl)
-                    saved_cap_float = float(saved_lst_cap)
                     saved_tvl_float = float(saved_lst_tvl)
                     
-                    # Преобразование в int для проверки свободного места (с точностью до целых)
-                    current_cap = int(current_cap_float)
-                    current_tvl = int(current_tvl_float)
-                    saved_cap = int(saved_cap_float)
-                    saved_tvl = int(saved_tvl_float)
+                    # Вычисляем изменение
+                    change = current_tvl_float - saved_tvl_float
+                    change_abs = abs(change)
                     
-                    # Логируем любое изменение lst_tvl (с учетом десятичной части)
-                    if current_tvl_float != saved_tvl_float:
+                    # Проверяем изменение больше чем на 1 целое
+                    if change_abs > 1.0:
                         asset_name = current_asset.get('asset_name', ticker)
-                        change = current_tvl_float - saved_tvl_float
                         change_sign = "+" if change > 0 else ""
                         logger.info(f"Изменение lst_tvl для {asset_name} ({ticker}): {saved_tvl_float} → {current_tvl_float} ({change_sign}{change})")
                         
-                        # Отправляем уведомление админу с десятичной частью
-                        if ADMIN_ID:
-                            try:
-                                change_text = f"{change_sign}{change}" if change != 0 else "0"
-                                admin_message = f"📊 <b>lst_tvl changed</b>\n\nAsset: <b>{asset_name}</b> ({ticker})\nOld value: {saved_tvl_float}\nNew value: {current_tvl_float}\nChange: {change_text}"
-                                await bot.send_message(
-                                    ADMIN_ID,
-                                    admin_message,
-                                    parse_mode='HTML'
-                                )
-                                logger.debug(f"Уведомление об изменении lst_tvl отправлено админу для {asset_name} ({ticker})")
-                            except Exception as e:
-                                logger.warning(f"Не удалось отправить уведомление админу об изменении lst_tvl: {e}")
-                    
-                    # Проверяем, что раньше было заполнено (lst_tvl == lst_cap с точностью до целых)
-                    saved_was_full = saved_tvl == saved_cap
-                    # Проверяем, что сейчас есть свободное место
-                    current_has_space = current_tvl < current_cap
-                    
-                    if saved_was_full and current_has_space:
-                        asset_name = current_asset.get('asset_name', ticker)
+                        # Отправляем уведомление подписанным пользователям
                         subscribed_users = await get_subscribed_users(ticker)
                         if subscribed_users:
-                            free_space = current_cap - current_tvl
-                            logger.info(f"Обнаружено свободное место для {asset_name} ({ticker}): {free_space}. Подписчиков: {len(subscribed_users)}")
+                            # Формируем изменение с точностью до сотых и знаком + или -
+                            change_text = f"{change:+.2f}" if change != 0 else "0.00"
+                            
+                            # Формируем информацию "сколько осталось из скольки"
+                            capacity_info = ""
+                            if current_lst_cap is not None:
+                                try:
+                                    cap_int = int(float(current_lst_cap))
+                                    tvl_int = int(current_tvl_float)
+                                    capacity_info = f"\nFilled: {tvl_int:,} / {cap_int:,}"
+                                except (ValueError, TypeError):
+                                    pass
+                            
+                            # Выбираем эмодзи в зависимости от направления изменения
+                            change_emoji = "📈" if change > 0 else "📉"
+                            user_message = f"{change_emoji} <b>Capacity changed</b>\n\nAsset: <b>{asset_name}</b> ({ticker})\nChange: {change_text}{capacity_info}\n\n<a href=\"https://app.piggybank.fi/\">Open PiggyBank</a>"
                             notifications.append({
-                                'type': 'space_available',
+                                'type': 'lst_tvl_changed',
                                 'asset_ticker': ticker,
                                 'asset_name': asset_name,
                                 'users': subscribed_users,
-                                'free_space': free_space,
-                                'message': f"✅ Space available for <b>{asset_name}</b>! Free: {free_space}\n\n<a href=\"https://app.piggybank.fi/\">Open PiggyBank</a>"
+                                'old_value': saved_tvl_float,
+                                'new_value': current_tvl_float,
+                                'change': change,
+                                'message': user_message
                             })
+                            logger.info(f"Уведомление об изменении lst_tvl для {asset_name} ({ticker}) добавлено в очередь. Подписчиков: {len(subscribed_users)}")
                 except (ValueError, TypeError) as e:
-                    logger.warning(f"Ошибка при преобразовании значений lst_cap/lst_tvl для {ticker}: {e}")
+                    logger.warning(f"Ошибка при преобразовании значений lst_tvl для {ticker}: {e}")
                     continue
     
     # 4. Обновляем сохраненные данные
@@ -594,7 +674,8 @@ async def send_notifications(notifications):
                 await bot.send_message(
                     user_id,
                     message_text,
-                    parse_mode='HTML'
+                    parse_mode='HTML',
+                    link_preview_options=types.LinkPreviewOptions(is_disabled=True)
                 )
                 total_sent += 1
                 # Небольшая задержка, чтобы не перегружать API

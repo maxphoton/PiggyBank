@@ -1,17 +1,18 @@
 # 🐷 PiggyBank Bot
 
-> Real-time Telegram bot for monitoring PiggyBank assets and receiving instant notifications about epoch changes, new assets, and available space.
+> Real-time Telegram bot for monitoring PiggyBank assets and receiving instant notifications about epoch changes, new assets, and TVL changes.
 
-[![Python](https://img.shields.io/badge/Python-3.11+-blue.svg)](https://www.python.org/)
+[![Python](https://img.shields.io/badge/Python-3.13+-blue.svg)](https://www.python.org/)
 [![aiogram](https://img.shields.io/badge/aiogram-3.24.0-green.svg)](https://docs.aiogram.dev/)
 [![Docker](https://img.shields.io/badge/Docker-Ready-blue.svg)](https://www.docker.com/)
 
 ## ✨ Features
 
 - 🔔 **Real-time Notifications** - Get instant alerts about asset changes
-- 📊 **Asset Monitoring** - Track epoch changes, new assets, and available space
-- 🎯 **Selective Subscriptions** - Choose which assets to monitor with interactive checkboxes
-- 📈 **Admin Dashboard** - Export data, view statistics, and monitor logs
+- 📊 **Asset Monitoring** - Track epoch changes, new assets, and TVL changes
+- 🎯 **Selective Subscriptions** - Choose which assets to monitor with interactive checkboxes (✅/🔲)
+- 📈 **Asset Statistics** - View current status of all assets with epoch via `/get_stats`
+- 🛠️ **Admin Dashboard** - Export data, view statistics, and monitor logs
 - 🧪 **Test Mode** - Test bot functionality with local data files
 - 🐳 **Docker Support** - Easy deployment with Docker Compose
 - 📝 **Comprehensive Logging** - Full logging with file and console output
@@ -21,7 +22,7 @@
 
 ### Prerequisites
 
-- Python 3.11+ or Docker
+- Python 3.13+ or Docker
 - Telegram Bot Token ([@BotFather](https://t.me/BotFather))
 - Telegram User ID ([@userinfobot](https://t.me/userinfobot))
 
@@ -89,14 +90,46 @@ All data (database, logs, cache) will be persisted in the `data/` directory.
 
 ### For Users
 
-**Start the bot:**
+**Start the bot and configure subscriptions:**
 ```
 /start
 ```
 
-The bot will show you a list of available assets with epoch. Click on any asset to enable/disable notifications:
+The bot will show you:
+- A list of available assets with epoch
+- Information about notification types you'll receive
+- Interactive checkboxes to enable/disable notifications for each asset
+
+Click on any asset to toggle notifications:
 - ✅ = Notifications enabled
-- ☐ = Notifications disabled
+- 🔲 = Notifications disabled
+
+**Notification types you'll receive:**
+- 🔄 Epoch changes for subscribed assets
+- 📈📉 Capacity changes (when TVL changes by more than 1)
+
+**View asset statistics:**
+```
+/get_stats
+```
+
+Shows all assets with epoch, including:
+- Asset name and ticker
+- Current epoch number
+- Filling status (filled amount / capacity)
+- Filling percentage
+
+**View demo notifications:**
+```
+/demo
+```
+
+**View asset statistics:**
+```
+/get_stats
+```
+
+This command shows you all assets with epoch, their current status, filling percentage, and capacity information.
 
 **View demo notifications:**
 ```
@@ -107,13 +140,14 @@ This command sends you all types of notifications so you can see what to expect.
 
 **Notification Types:**
 - 🆕 **New asset added** - Sent to all users when a new asset with epoch appears
+  - Includes: Asset name, filling status (X / Y), link to platform
 - 🔄 **New Epoch** - Sent to subscribed users when epoch number changes
-- ✅ **Space available** - Sent to subscribed users when space becomes available (when `lst_tvl < lst_cap`)
+  - Includes: Old → New epoch, filling status (X / Y), link to platform
+- 📈/📉 **TVL changed** - Sent to subscribed users when TVL changes by more than 1
+  - Includes: Change amount (with ± sign, precision to hundredths), filling status (X / Y), link to platform
+  - 📈 for increase, 📉 for decrease
 
-Each notification includes:
-- Asset name and ticker
-- Free space information (if available)
-- Direct link to PiggyBank platform
+All notifications include direct links to the PiggyBank platform.
 
 ### For Administrators
 
@@ -122,15 +156,19 @@ Each notification includes:
 /get_data
 ```
 
-This command exports:
+This admin-only command exports:
 - All database tables as CSV files (`users.csv`, `user_subscriptions.csv`)
-- Bot statistics (users, subscriptions, top assets)
+- Bot usage statistics (users, subscriptions, top assets)
 - Log file (`bot.log`)
 
+**Admin receives:**
+- ✅ Bot startup confirmation message
+- Full access to data export and statistics
+
 **Admin Notifications:**
-- All `lst_tvl` changes are logged and sent to admin
-- Bot startup confirmation
-- Full access to bot data export
+- Bot startup confirmation (✅)
+- Full access to bot data export via `/get_data`
+- All `lst_tvl` changes are logged (but not sent as notifications)
 
 ## 🏗️ Architecture
 
@@ -159,15 +197,19 @@ This command exports:
 ### Background Monitoring
 
 The bot runs a background task every minute that:
-1. Fetches current asset data
+1. Fetches current asset data from API (or test file in test mode)
 2. Compares with saved data to detect changes
 3. Generates notifications for:
-   - New assets with epoch (broadcast to all users)
-   - Epoch changes (sent to subscribed users)
-   - Available space (sent to subscribed users)
-   - `lst_tvl` changes (admin only, with decimal precision)
-4. Sends notifications to subscribed users
+   - **New assets with epoch** - Broadcast to all users when epoch key appears
+   - **Epoch changes** - Sent to subscribed users when epoch number changes
+   - **TVL changes** - Sent to subscribed users when `lst_tvl` changes by more than 1 (with ± sign, precision to hundredths)
+4. Sends notifications to subscribed users in background
 5. Updates saved data cache
+
+**Important:**
+- TVL notifications are only sent if the change is greater than 1 (absolute value)
+- TVL appearance (when asset first gets `lst_tvl`) is not tracked separately (covered by epoch appearance)
+- All notifications include filling status (filled X / capacity Y)
 
 ## 📁 Project Structure
 
@@ -232,7 +274,7 @@ Logs are written to:
 
 ### What Gets Logged
 
-- All asset changes (epoch, lst_tvl)
+- All asset changes (epoch, lst_tvl) with details
 - User actions (subscriptions, commands)
 - Notification sending status
 - API requests and responses
@@ -242,13 +284,13 @@ Logs are written to:
 ### Admin Monitoring
 
 Administrators receive:
-- Notifications about all `lst_tvl` changes (with decimal precision)
-- Bot startup confirmation
+- ✅ Bot startup confirmation message
 - Access to `/get_data` command for full export
+- All `lst_tvl` changes are logged (but not sent as notifications)
 
 ## 🛠️ Technologies
 
-- **Python 3.11+** - Programming language
+- **Python 3.13+** - Programming language
 - **aiogram 3.24.0** - Telegram Bot API framework
 - **aiohttp 3.13.2** - Async HTTP client
 - **aiosqlite 0.22.1** - Async SQLite driver
@@ -267,18 +309,20 @@ Administrators receive:
 
 ### Smart Notifications
 
-- **Broadcast notifications** - New assets sent to all users
-- **Targeted notifications** - Epoch changes and space availability sent only to subscribed users
-- **Admin alerts** - All `lst_tvl` changes reported to administrator with decimal precision
-- **Rich formatting** - HTML formatting with links and emojis
+- **Broadcast notifications** - New assets with epoch sent to all users
+- **Targeted notifications** - Epoch changes and TVL changes sent only to subscribed users
+- **Threshold-based TVL alerts** - Only significant TVL changes (>1) trigger notifications
+- **Rich formatting** - HTML formatting with links, emojis (🆕, 🔄, 📈, 📉), and capacity information
+- **Precise change tracking** - TVL changes shown with ± sign and precision to hundredths (e.g., +123.45 or -67.89)
 
 ### Data Management
 
-- **Automatic caching** - Asset data cached locally
+- **Automatic caching** - Asset data cached locally in JSON format
 - **Change detection** - Compares current vs saved data with precision
-- **CSV export** - Full database export for analysis
-- **Statistics** - Real-time bot usage statistics
-- **Test mode** - Local testing without API calls
+- **CSV export** - Full database export for analysis (admin only)
+- **Statistics** - Real-time bot usage statistics and asset statistics
+- **Asset status view** - `/get_stats` command shows all assets with epoch, filling status, and percentages
+- **Test mode** - Local testing without API calls using `test_api.json`
 
 ### Performance
 
