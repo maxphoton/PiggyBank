@@ -107,6 +107,7 @@ Click on any asset to toggle notifications:
 **Notification types you'll receive:**
 - 🔄 Epoch changes for subscribed assets
 - 📈📉 Capacity changes (when TVL changes by more than 1)
+- 🔧 Capacity limit changes (when lst_cap changes)
 
 **View asset statistics:**
 ```
@@ -146,6 +147,8 @@ This command sends you all types of notifications so you can see what to expect.
 - 📈/📉 **TVL changed** - Sent to subscribed users when TVL changes by more than 1
   - Includes: Change amount (with ± sign, precision to hundredths), filling status (X / Y), link to platform
   - 📈 for increase, 📉 for decrease
+- 🔧 **Capacity limit changed** - Sent to subscribed users when lst_cap changes
+  - Includes: Change amount (with ± sign, precision to hundredths), filling status (X / Y), link to platform
 
 All notifications include direct links to the PiggyBank platform.
 
@@ -203,11 +206,13 @@ The bot runs a background task every minute that:
    - **New assets with epoch** - Broadcast to all users when epoch key appears
    - **Epoch changes** - Sent to subscribed users when epoch number changes
    - **TVL changes** - Sent to subscribed users when `lst_tvl` changes by more than 1 (with ± sign, precision to hundredths)
+   - **Capacity limit changes** - Sent to subscribed users when `lst_cap` changes (with ± sign, precision to hundredths)
 4. Sends notifications to subscribed users in background
 5. Updates saved data cache
 
 **Important:**
 - TVL notifications are only sent if the change is greater than 1 (absolute value)
+- Capacity limit (`lst_cap`) notifications are sent for any change (not threshold-based)
 - TVL appearance (when asset first gets `lst_tvl`) is not tracked separately (covered by epoch appearance)
 - All notifications include filling status (filled X / capacity Y)
 
@@ -274,7 +279,7 @@ Logs are written to:
 
 ### What Gets Logged
 
-- All asset changes (epoch, lst_tvl) with details
+- All asset changes (epoch, lst_tvl, lst_cap) with details
 - User actions (subscriptions, commands)
 - Notification sending status
 - API requests and responses
@@ -310,10 +315,11 @@ Administrators receive:
 ### Smart Notifications
 
 - **Broadcast notifications** - New assets with epoch sent to all users
-- **Targeted notifications** - Epoch changes and TVL changes sent only to subscribed users
+- **Targeted notifications** - Epoch changes, TVL changes, and capacity limit changes sent only to subscribed users
 - **Threshold-based TVL alerts** - Only significant TVL changes (>1) trigger notifications
-- **Rich formatting** - HTML formatting with links, emojis (🆕, 🔄, 📈, 📉), and capacity information
-- **Precise change tracking** - TVL changes shown with ± sign and precision to hundredths (e.g., +123.45 or -67.89)
+- **Capacity limit tracking** - All capacity limit (`lst_cap`) changes trigger notifications (no threshold)
+- **Rich formatting** - HTML formatting with links, emojis (🆕, 🔄, 📈, 📉, 🔧), and capacity information
+- **Precise change tracking** - Changes shown with ± sign and precision to hundredths (e.g., +123.45 or -67.89)
 
 ### Data Management
 

@@ -212,6 +212,7 @@ async def cmd_demo(message: types.Message):
     demo_cap = 1000000
     demo_change_positive = 123.45
     demo_change_negative = -67.89
+    demo_cap_change_positive = 50000.00
     
     demo_notifications = [
         {
@@ -229,6 +230,10 @@ async def cmd_demo(message: types.Message):
         {
             'type': 'lst_tvl_changed_negative',
             'message': f"📉 <b>Capacity changed</b>\n\nAsset: <b>{demo_asset_name}</b> ({demo_ticker})\nChange: {demo_change_negative:.2f}\nFilled: {demo_tvl:,} / {demo_cap:,}\n\n<a href=\"https://app.piggybank.fi/\">Open PiggyBank</a>\n\n<i>⚠️ This is a demo notification</i>"
+        },
+        {
+            'type': 'lst_cap_changed_positive',
+            'message': f"🔧 <b>Capacity limit changed</b>\n\nAsset: <b>{demo_asset_name}</b> ({demo_ticker})\nChange: +{demo_cap_change_positive:.2f}\nFilled: {demo_tvl:,} / {demo_cap:,}\n\n<a href=\"https://app.piggybank.fi/\">Open PiggyBank</a>\n\n<i>⚠️ This is a demo notification</i>"
         }
     ]
     
@@ -643,7 +648,64 @@ async def check_assets_changes():
                     logger.warning(f"Ошибка при преобразовании значений lst_tvl для {ticker}: {e}")
                     continue
     
-    # 4. Обновляем сохраненные данные
+    # 4. Проверяем изменения lst_cap (только для существующих активов)
+    for ticker, current_asset in current_dict.items():
+        saved_asset = saved_dict.get(ticker)
+        if saved_asset:
+            current_lst_cap = current_asset.get('lst_cap')
+            saved_lst_cap = saved_asset.get('lst_cap')
+            current_lst_tvl = current_asset.get('lst_tvl')
+            
+            # Проверяем, что значения существуют
+            if current_lst_cap is not None and saved_lst_cap is not None:
+                try:
+                    # Преобразование в float для сохранения десятичной части
+                    current_cap_float = float(current_lst_cap)
+                    saved_cap_float = float(saved_lst_cap)
+                    
+                    # Вычисляем изменение
+                    change = current_cap_float - saved_cap_float
+                    change_abs = abs(change)
+                    
+                    # Отправляем уведомление при любом изменении (не только > 1)
+                    if change_abs > 0:
+                        asset_name = current_asset.get('asset_name', ticker)
+                        change_sign = "+" if change > 0 else ""
+                        logger.info(f"Изменение lst_cap для {asset_name} ({ticker}): {saved_cap_float} → {current_cap_float} ({change_sign}{change})")
+                        
+                        # Отправляем уведомление подписанным пользователям
+                        subscribed_users = await get_subscribed_users(ticker)
+                        if subscribed_users:
+                            # Формируем изменение с точностью до сотых и знаком + или -
+                            change_text = f"{change:+.2f}" if change != 0 else "0.00"
+                            
+                            # Формируем информацию "сколько осталось из скольки"
+                            capacity_info = ""
+                            if current_lst_tvl is not None:
+                                try:
+                                    cap_int = int(current_cap_float)
+                                    tvl_int = int(float(current_lst_tvl))
+                                    capacity_info = f"\nFilled: {tvl_int:,} / {cap_int:,}"
+                                except (ValueError, TypeError):
+                                    pass
+                            
+                            user_message = f"🔧 <b>Capacity limit changed</b>\n\nAsset: <b>{asset_name}</b> ({ticker})\nChange: {change_text}{capacity_info}\n\n<a href=\"https://app.piggybank.fi/\">Open PiggyBank</a>"
+                            notifications.append({
+                                'type': 'lst_cap_changed',
+                                'asset_ticker': ticker,
+                                'asset_name': asset_name,
+                                'users': subscribed_users,
+                                'old_value': saved_cap_float,
+                                'new_value': current_cap_float,
+                                'change': change,
+                                'message': user_message
+                            })
+                            logger.info(f"Уведомление об изменении lst_cap для {asset_name} ({ticker}) добавлено в очередь. Подписчиков: {len(subscribed_users)}")
+                except (ValueError, TypeError) as e:
+                    logger.warning(f"Ошибка при преобразовании значений lst_cap для {ticker}: {e}")
+                    continue
+    
+    # 5. Обновляем сохраненные данные
     await save_assets_to_json(current_assets)
     
     if notifications:
