@@ -772,6 +772,33 @@ async def send_notifications(notifications):
     logger.info(f"Рассылка завершена. Отправлено: {total_sent}, Ошибок: {total_failed}")
 
 
+async def notify_admin_about_api_error(error_status, error_message=None):
+    """Отправка уведомления админу об ошибке API"""
+    if not ADMIN_ID:
+        return
+    
+    try:
+        if error_status:
+            message = f"⚠️ <b>Ошибка при запросе к API</b>\n\nСтатус: {error_status}"
+            if error_status == 429:
+                message += "\n\nToo Many Requests - слишком много запросов"
+            elif error_status == 503:
+                message += "\n\nService Unavailable - сервис недоступен"
+        else:
+            message = f"⚠️ <b>Ошибка при запросе к API</b>\n\nНе удалось получить данные с API"
+            if error_message:
+                message += f"\n\nОшибка: {error_message}"
+        
+        await bot.send_message(
+            ADMIN_ID,
+            message,
+            parse_mode='HTML'
+        )
+        logger.info(f"Уведомление об ошибке API отправлено админу {ADMIN_ID}")
+    except Exception as e:
+        logger.error(f"Не удалось отправить уведомление админу об ошибке API: {e}", exc_info=True)
+
+
 async def background_task():
     """Фоновая задача, выполняющаяся раз в минуту (или 5 минут при ошибках API)"""
     logger.info("Фоновая задача запущена")
@@ -786,10 +813,15 @@ async def background_task():
             # Собираем уведомления
             notifications, error_status = await check_assets_changes()
             
-            # Проверяем, была ли ошибка API (429 или 503)
-            if error_status in [429, 503]:
-                logger.warning(f"Получена ошибка API {error_status}. Следующая проверка через {error_wait_interval} секунд (5 минут)")
-                wait_interval = error_wait_interval
+            # Проверяем, была ли ошибка API
+            if error_status is not None:
+                # Отправляем уведомление админу при каждой ошибке
+                await notify_admin_about_api_error(error_status)
+                
+                # Проверяем, была ли ошибка API (429 или 503)
+                if error_status in [429, 503]:
+                    logger.warning(f"Получена ошибка API {error_status}. Следующая проверка через {error_wait_interval} секунд (5 минут)")
+                    wait_interval = error_wait_interval
             elif error_status is None and wait_interval != 60:
                 # Если запрос успешен, возвращаемся к обычному интервалу
                 logger.info(f"Запрос к API успешен. Возвращаемся к обычному интервалу проверки (60 секунд)")
@@ -805,6 +837,8 @@ async def background_task():
             logger.error(f"Ошибка в фоновой задаче: {e}", exc_info=True)
             # При исключении также увеличиваем интервал
             wait_interval = error_wait_interval
+            # Отправляем уведомление админу об исключении
+            await notify_admin_about_api_error(None, str(e))
         
         # Ждем перед следующей проверкой (динамический интервал)
         logger.debug(f"Ожидание {wait_interval} секунд до следующей проверки")
