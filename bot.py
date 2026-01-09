@@ -9,7 +9,7 @@ from aiogram.filters import Command
 from aiogram.types import InlineKeyboardButton, FSInputFile
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from config import BOT_TOKEN, ADMIN_ID, API_URL, DATA_FILE, LOG_FILE, TEST_API, TEST_API_FILE
+from config import BOT_TOKEN, ADMIN_ID, API_URL, DATA_FILE, LOG_FILE, TEST_API, TEST_API_FILE, PROXY
 from database import (
     init_db, save_user, toggle_subscription, get_user_subscriptions,
     get_subscribed_users, get_all_users, export_table_to_csv, get_bot_statistics
@@ -51,36 +51,57 @@ async def load_test_api_file():
 
 
 async def fetch_assets():
-    """Получение данных об активах с API или из файла (в тестовом режиме)"""
+    """Получение данных об активах с API или из файла (в тестовом режиме)
+    Возвращает кортеж (data, error_status) где error_status - код ошибки или None при успехе"""
     # Если включен тестовый режим, загружаем данные из test_api.json
     if TEST_API:
         logger.info(f"Тестовый режим: загрузка данных из файла {TEST_API_FILE}")
         data = await load_test_api_file()
         if data is None:
             logger.warning(f"Тестовый режим: файл {TEST_API_FILE} не найден или пуст")
-            return None
+            return None, None
         logger.info(f"Тестовый режим: данные загружены из файла. Найдено активов: {len(data)}")
-        return data
+        return data, None
     
     # Обычный режим: запрос к API
     logger.info("Запрос данных с API")
     try:
+        # Используем прокси, если он указан
+        proxy_url = PROXY if PROXY else None
+        if proxy_url:
+            logger.info(f"Использование прокси: {proxy_url.split('@')[1] if '@' in proxy_url else proxy_url}")
+        
+        # Заголовки для имитации браузера
+        headers = {
+            'Host': 'app.piggybank.fi',
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:146.0) Gecko/20100101 Firefox/146.0',
+            'Accept': '*/*',
+            'Accept-Language': 'ru-RU,ru;q=0.8,en-US;q=0.5,en;q=0.3',
+            'Accept-Encoding': 'gzip, deflate',
+            'Referer': 'https://app.piggybank.fi/',
+            'Sec-Fetch-Dest': 'empty',
+            'Sec-Fetch-Mode': 'cors',
+            'Sec-Fetch-Site': 'same-origin',
+            'Connection': 'keep-alive',
+            'Cookie': '_cfuvid=h1FR47cJVQMJ8IrzV1DPxR7oembK8XjJGRm7mXjdKis-1767440849890-0.0.1.1-604800000'
+        }
+        
         async with aiohttp.ClientSession() as session:
-            async with session.get(API_URL) as response:
+            async with session.get(API_URL, proxy=proxy_url, headers=headers) as response:
                 if response.status == 200:
                     data = await response.json()
                     # Проверка типа данных
                     if not isinstance(data, list):
                         logger.error(f"API вернул не список, а {type(data)}")
-                        return None
+                        return None, None
                     logger.info(f"Данные успешно получены с API. Найдено активов: {len(data)}")
-                    return data
+                    return data, None
                 else:
                     logger.warning(f"Ошибка при получении данных с API. Статус: {response.status}")
-                    return None
+                    return None, response.status
     except Exception as e:
         logger.error(f"Исключение при запросе к API: {e}", exc_info=True)
-        return None
+        return None, None
 
 
 async def save_assets_to_json(data):
@@ -159,7 +180,7 @@ async def cmd_start(message: types.Message):
     logger.debug(f"Пользователь {user.id} сохранен в базу данных")
     
     # Получение данных с API
-    assets_data = await fetch_assets()
+    assets_data, _ = await fetch_assets()
     
     if assets_data is None:
         logger.warning(f"Не удалось получить данные с API для пользователя {user.id}")
@@ -372,7 +393,7 @@ async def cmd_get_stats(message: types.Message):
     
     try:
         # Получение данных с API
-        assets_data = await fetch_assets()
+        assets_data, _ = await fetch_assets()
         
         if assets_data is None:
             logger.warning(f"Не удалось получить данные с API для пользователя {user.id}")
@@ -444,7 +465,7 @@ async def process_asset_toggle(callback: types.CallbackQuery):
     logger.info(f"Переключение подписки на {asset_ticker} для пользователя {user.id}")
     
     # Загружаем данные об активах для получения названия
-    assets_data = await fetch_assets()
+    assets_data, _ = await fetch_assets()
     if assets_data is None:
         logger.warning(f"Не удалось загрузить данные для переключения подписки пользователя {user.id}")
         await callback.answer("❌ Error loading data", show_alert=True)
@@ -492,14 +513,15 @@ Click on an asset to enable/disable notifications"""
 
 
 async def check_assets_changes():
-    """Проверка изменений в активах и сбор списка уведомлений"""
+    """Проверка изменений в активах и сбор списка уведомлений
+    Возвращает кортеж (notifications, error_status) где error_status - код ошибки или None"""
     logger.info("Начало проверки изменений в активах")
     
     # Получаем текущие данные с API
-    current_assets = await fetch_assets()
+    current_assets, error_status = await fetch_assets()
     if current_assets is None:
         logger.warning("Не удалось получить данные с API для проверки изменений")
-        return []
+        return [], error_status
     
     # Загружаем сохраненные данные
     saved_assets = await load_assets_from_json()
@@ -713,7 +735,7 @@ async def check_assets_changes():
     else:
         logger.debug("Проверка завершена. Изменений не обнаружено")
     
-    return notifications
+    return notifications, None
 
 
 async def send_notifications(notifications):
@@ -751,13 +773,27 @@ async def send_notifications(notifications):
 
 
 async def background_task():
-    """Фоновая задача, выполняющаяся раз в минуту"""
+    """Фоновая задача, выполняющаяся раз в минуту (или 5 минут при ошибках API)"""
     logger.info("Фоновая задача запущена")
+    
+    # Интервал ожидания по умолчанию (1 минута)
+    wait_interval = 60
+    # Интервал ожидания при ошибках API (5 минут)
+    error_wait_interval = 300
     
     while True:
         try:
             # Собираем уведомления
-            notifications = await check_assets_changes()
+            notifications, error_status = await check_assets_changes()
+            
+            # Проверяем, была ли ошибка API (429 или 503)
+            if error_status in [429, 503]:
+                logger.warning(f"Получена ошибка API {error_status}. Следующая проверка через {error_wait_interval} секунд (5 минут)")
+                wait_interval = error_wait_interval
+            elif error_status is None and wait_interval != 60:
+                # Если запрос успешен, возвращаемся к обычному интервалу
+                logger.info(f"Запрос к API успешен. Возвращаемся к обычному интервалу проверки (60 секунд)")
+                wait_interval = 60
             
             # Рассылаем уведомления в фоне
             if notifications:
@@ -767,10 +803,12 @@ async def background_task():
             
         except Exception as e:
             logger.error(f"Ошибка в фоновой задаче: {e}", exc_info=True)
+            # При исключении также увеличиваем интервал
+            wait_interval = error_wait_interval
         
-        # Ждем минуту перед следующей проверкой
-        logger.debug("Ожидание 60 секунд до следующей проверки")
-        await asyncio.sleep(60)
+        # Ждем перед следующей проверкой (динамический интервал)
+        logger.debug(f"Ожидание {wait_interval} секунд до следующей проверки")
+        await asyncio.sleep(wait_interval)
 
 
 async def main():

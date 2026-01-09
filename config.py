@@ -18,6 +18,8 @@ ADMIN_ID = int(admin_id_str)
 API_URL = os.getenv('API_URL', '')
 # Test mode: if True, data will be loaded from saved file instead of API
 TEST_API = os.getenv('TEST_API', 'false').lower() in ('true', '1', 'yes', 'on')
+# Proxy configuration (optional)
+PROXY = os.getenv('PROXY', '')
 
 # Data directory configuration
 DATA_DIR = os.getenv('DATA_DIR', '')
