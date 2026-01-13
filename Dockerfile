@@ -14,7 +14,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Копирование кода приложения
-COPY bot.py config.py database.py ./
+COPY bot.py config.py database.py broadcast_router.py broadcast.py oinks.png ./
 
 # Переменные окружения
 ENV PYTHONUNBUFFERED=1
